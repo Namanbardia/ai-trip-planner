@@ -2,3 +2,11 @@
 fastapi
 uvicorn
 python-dotenv
+numpy
+random
+typing
+pydantic
+sklearn
+time
+json
+math
