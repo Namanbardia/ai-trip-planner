@@ -69,17 +69,36 @@ function MapRecenter({ center }) {
   return null;
 }
 
+/** Fits the map view to every visible stop (+ hotel) when routes change. */
+function FitBounds({ positions, boundsKey }) {
+  const map = useMap();
+  useEffect(() => {
+    if (!positions || positions.length === 0) return;
+    // Defer so tiles/markers have laid out first
+    const t = setTimeout(() => {
+      try {
+        map.fitBounds(positions, { padding: [40, 40], maxZoom: 14, animate: true });
+      } catch {
+        /* map may be unmounting */
+      }
+    }, 120);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [boundsKey, map]);
+  return null;
+}
+
 export default function TripMap({ tripPlan, activeDay }) {
   if (!tripPlan || !tripPlan.daily_routes || tripPlan.daily_routes.length === 0) {
     return (
-      <div className="h-96 w-full rounded-2xl bg-slate-100 flex flex-col items-center justify-center text-slate-400 border border-slate-200">
+      <div className="h-96 w-full bg-bone flex flex-col items-center justify-center text-sage border border-ink/10">
         <Compass className="w-10 h-10 mb-2 stroke-[1.5]" />
-        <p className="text-sm">Submit your preferences to generate the interactive route map</p>
+        <p className="font-sans text-sm">Your route map will appear once an itinerary is generated</p>
       </div>
     );
   }
 
-  const { coordinates, recommended_hotel, daily_routes } = tripPlan;
+  const { coordinates, start_location: startLocation, daily_routes } = tripPlan;
   const initialCenter = coordinates || { lat: 48.8566, lng: 2.3522 };
 
   const displayedRoutes = activeDay === 0 || activeDay === null
@@ -90,8 +109,19 @@ export default function TripMap({ tripPlan, activeDay }) {
     ? daily_routes[activeDay - 1].centroid
     : initialCenter;
 
+  // Collect every visible point so the map can auto-fit to them
+  const allPositions = [];
+  if (startLocation?.lat) allPositions.push([startLocation.lat, startLocation.lng]);
+  displayedRoutes.forEach((d) =>
+    (d.attractions || []).forEach((p) => {
+      if (typeof p.lat === 'number' && typeof p.lng === 'number') allPositions.push([p.lat, p.lng]);
+    })
+  );
+  // Stable identity for the effect: serialize so it only refits when points change
+  const boundsKey = allPositions.map((p) => p.join(',')).join('|');
+
   return (
-    <div className="relative w-full h-[540px] rounded-2xl overflow-hidden shadow-sm border border-slate-200">
+    <div className="relative w-full h-[540px] overflow-hidden border border-ink/15">
       <MapContainer
         center={[initialCenter.lat, initialCenter.lng]}
         zoom={13}
@@ -99,25 +129,25 @@ export default function TripMap({ tripPlan, activeDay }) {
         className="w-full h-full"
       >
         <MapRecenter center={activeCenter} />
+        <FitBounds positions={allPositions} boundsKey={boundsKey} />
 
         <TileLayer
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         />
 
-        {recommended_hotel && (
+        {startLocation && (
           <Marker
-            position={[recommended_hotel.lat, recommended_hotel.lng]}
+            position={[startLocation.lat, startLocation.lng]}
             icon={createHotelIcon()}
           >
             <Popup>
               <div className="p-1">
-                <div className="font-bold text-xs text-slate-900">{recommended_hotel.name}</div>
-                <div className="text-[11px] text-amber-600 font-semibold mt-0.5">
-                  ★ {recommended_hotel.rating} / 5.0
-                </div>
+                <div className="font-bold text-xs text-slate-900">{startLocation.name}</div>
                 <div className="text-[10px] text-slate-500 mt-1">
-                  Anchor Hotel: Selected for route proximity
+                  {startLocation.source === 'user_hotel'
+                    ? 'Your stay — every day starts here'
+                    : 'City centre — add a hotel to start from your door'}
                 </div>
               </div>
             </Popup>
@@ -129,8 +159,8 @@ export default function TripMap({ tripPlan, activeDay }) {
           const stops = dayPlan.attractions || [];
 
           const polylineCoords = [];
-          if (recommended_hotel) {
-            polylineCoords.push([recommended_hotel.lat, recommended_hotel.lng]);
+          if (startLocation) {
+            polylineCoords.push([startLocation.lat, startLocation.lng]);
           }
           stops.forEach((p) => {
             polylineCoords.push([p.lat, p.lng]);
@@ -185,24 +215,24 @@ export default function TripMap({ tripPlan, activeDay }) {
         })}
       </MapContainer>
 
-      <div className="absolute top-3 right-3 z-[1000] bg-white/95 backdrop-blur-xs p-2.5 rounded-xl shadow-md border border-slate-200/80 text-xs">
-        <div className="font-semibold text-slate-700 text-[11px] mb-1.5 flex items-center gap-1">
-          <Navigation className="w-3 h-3 text-indigo-600" />
-          Map Legend
+      <div className="absolute top-3 right-3 z-[1000] bg-ivory/95 backdrop-blur-xs p-2.5 shadow-md border border-ink/15 text-xs">
+        <div className="font-sans font-semibold text-ink text-[11px] mb-1.5 flex items-center gap-1">
+          <Navigation className="w-3 h-3 text-terracotta" />
+          Legend
         </div>
-        <div className="flex items-center gap-2 mb-1 text-[11px] text-slate-600">
-          <span className="w-3.5 h-3.5 bg-slate-900 rounded text-center text-[10px] leading-3 text-yellow-300">🏨</span>
-          <span>Anchor Hotel</span>
+        <div className="flex items-center gap-2 mb-1 text-[11px] text-sage">
+          <span className="w-3.5 h-3.5 bg-ink rounded text-center text-[10px] leading-3 text-yellow-300">🏨</span>
+          <span>{startLocation?.source === 'user_hotel' ? 'Your hotel' : 'City centre'}</span>
         </div>
         {tripPlan.daily_routes.map((d, i) => (
-          <div key={d.day} className="flex items-center gap-2 text-[11px] text-slate-600 mb-0.5">
+          <div key={d.day} className="flex items-center gap-2 text-[11px] text-sage mb-0.5">
             <span
               className="w-3 h-3 rounded-full flex items-center justify-center text-[9px] font-bold text-white"
               style={{ backgroundColor: DAY_COLORS[i % DAY_COLORS.length] }}
             >
               {d.day}
             </span>
-            <span>Day {d.day} Itinerary</span>
+            <span>Day {d.day}</span>
           </div>
         ))}
       </div>

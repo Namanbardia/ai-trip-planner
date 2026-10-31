@@ -1,17 +1,15 @@
-import json
 from typing import Dict, List, Any
 
 class PersonalizationEngine:
     """
     Feedback-based Personalization Engine.
-    Incorporates user interactions (Likes, Dislikes, Skipped places, Saved trips)
+    Incorporates user interactions (Likes, Dislikes, Skipped places)
     to dynamically adapt recommendation preferences and category weights.
     """
     def __init__(self):
         self.likes: List[Dict[str, Any]] = []
         self.dislikes: List[Dict[str, Any]] = []
         self.skipped: List[Dict[str, Any]] = []
-        self.saved_trips: List[Dict[str, Any]] = []
 
     def record_feedback(
         self,
@@ -42,18 +40,6 @@ class PersonalizationEngine:
             self.skipped.append(record)
 
         return self.get_profile_summary()
-
-    def save_trip(self, trip_plan: Dict[str, Any]) -> Dict[str, Any]:
-        """Saves an itinerary into the user's permanent trip history."""
-        trip_summary = {
-            "trip_id": f"trip_{len(self.saved_trips) + 1}",
-            "destination": trip_plan.get("destination", "Custom Trip"),
-            "days": trip_plan.get("days", 1),
-            "hotel_name": trip_plan.get("hotel", {}).get("name", "N/A"),
-            "attractions_count": sum(len(d.get("attractions", [])) for d in trip_plan.get("daily_routes", []))
-        }
-        self.saved_trips.append(trip_summary)
-        return trip_summary
 
     def get_category_weights(self) -> Dict[str, float]:
         """
@@ -92,13 +78,11 @@ class PersonalizationEngine:
             "total_likes": len(self.likes),
             "total_dislikes": len(self.dislikes),
             "total_skipped": len(self.skipped),
-            "total_saved_trips": len(self.saved_trips),
             "category_weights": cat_weights,
             "top_preferred_categories": top_preferred,
             "penalized_categories": penalized,
             "liked_places": self.likes[-10:],
-            "disliked_places": self.dislikes[-10:],
-            "saved_trips": self.saved_trips
+            "disliked_places": self.dislikes[-10:]
         }
 
 personalization_engine = PersonalizationEngine()

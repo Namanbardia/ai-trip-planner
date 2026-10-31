@@ -3,11 +3,9 @@ import {
   X, 
   Heart, 
   ThumbsDown, 
-  BookmarkCheck, 
   Sliders, 
   TrendingUp, 
   TrendingDown,
-  Sparkles,
   Lightbulb
 } from 'lucide-react';
 
@@ -22,11 +20,9 @@ export default function PersonalizationDrawer({
     total_likes = 0,
     total_dislikes = 0,
     total_skipped = 0,
-    total_saved_trips = 0,
     category_weights = {},
     liked_places = [],
-    disliked_places = [],
-    saved_trips = []
+    disliked_places = []
   } = userProfile || {};
 
   return (
@@ -69,7 +65,7 @@ export default function PersonalizationDrawer({
           </div>
 
           {/* Activity Counters */}
-          <div className="grid grid-cols-4 gap-2">
+          <div className="grid grid-cols-3 gap-2">
             <div className="p-2.5 rounded-xl bg-emerald-50 border border-emerald-100 text-center">
               <div className="text-lg font-bold text-emerald-700">{total_likes}</div>
               <div className="text-[10px] font-semibold text-emerald-800">Liked</div>
@@ -81,10 +77,6 @@ export default function PersonalizationDrawer({
             <div className="p-2.5 rounded-xl bg-amber-50 border border-amber-100 text-center">
               <div className="text-lg font-bold text-amber-700">{total_skipped}</div>
               <div className="text-[10px] font-semibold text-amber-800">Skipped</div>
-            </div>
-            <div className="p-2.5 rounded-xl bg-indigo-50 border border-indigo-100 text-center">
-              <div className="text-lg font-bold text-indigo-700">{total_saved_trips}</div>
-              <div className="text-[10px] font-semibold text-indigo-800">Saved Trips</div>
             </div>
           </div>
 
@@ -170,31 +162,6 @@ export default function PersonalizationDrawer({
                   >
                     <span className="font-medium text-slate-700">{place.place_name}</span>
                     <span className="text-[10px] text-rose-600">{place.category}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Saved Trips */}
-          {saved_trips.length > 0 && (
-            <div>
-              <h4 className="text-xs font-bold uppercase tracking-wider text-slate-700 mb-2 flex items-center gap-1.5">
-                <BookmarkCheck className="w-3.5 h-3.5 text-indigo-600" />
-                Your Saved Itineraries ({saved_trips.length})
-              </h4>
-              <div className="space-y-2">
-                {saved_trips.map((trip) => (
-                  <div
-                    key={trip.trip_id}
-                    className="p-3 rounded-xl bg-slate-50 border border-slate-200 text-xs"
-                  >
-                    <div className="font-bold text-slate-900 mb-0.5">
-                      {trip.destination} ({trip.days} Days)
-                    </div>
-                    <div className="text-[11px] text-slate-500">
-                      Base Hotel: {trip.hotel_name} • {trip.attractions_count} stops organized
-                    </div>
                   </div>
                 ))}
               </div>

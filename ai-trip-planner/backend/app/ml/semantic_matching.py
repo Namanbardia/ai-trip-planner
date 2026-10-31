@@ -32,6 +32,10 @@ class SemanticMatcher:
             stop_words="english",
             max_features=3000
         )
+        # Single-entry corpus cache: avoids refitting the TF-IDF model on every
+        # request when the same destination/attraction list is scored repeatedly.
+        self._cache_key = None
+        self._cached_place_vectors = None
 
     def _tokenize(self, text: str) -> set:
         """Extracts meaningful alphabetic tokens (length >= 3)."""
@@ -82,13 +86,17 @@ class SemanticMatcher:
         query_tokens = self._tokenize(raw_query)
 
         # 2. Build place documents & TF-IDF Cosine Similarity
+        #    (fit once per distinct attraction corpus; transform only for new queries)
         place_docs = [self._prepare_place_document(p) for p in places]
-        all_docs = [query_doc] + place_docs
+        cache_key = tuple(place_docs)
 
         try:
-            tfidf_matrix = self.vectorizer.fit_transform(all_docs)
-            query_vector = tfidf_matrix[0:1]
-            place_vectors = tfidf_matrix[1:]
+            if cache_key != self._cache_key or self._cached_place_vectors is None:
+                self.vectorizer.fit(place_docs)
+                self._cached_place_vectors = self.vectorizer.transform(place_docs)
+                self._cache_key = cache_key
+            query_vector = self.vectorizer.transform([query_doc])
+            place_vectors = self._cached_place_vectors
             cosine_sims = cosine_similarity(query_vector, place_vectors)[0]
         except Exception:
             cosine_sims = [0.1] * len(places)

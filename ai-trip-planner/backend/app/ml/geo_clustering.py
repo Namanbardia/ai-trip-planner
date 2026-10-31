@@ -45,7 +45,7 @@ class GeoClusterer:
             avg_lng = float(np.mean([a["lng"] for a in attractions]))
             for a in attractions:
                 a["cluster_id"] = 0
-            return {0: attractions}, [{"day": 0, "lat": avg_lat, "lng": avg_lng}]
+            return {0: attractions}, [{"day": 1, "lat": avg_lat, "lng": avg_lng}]
 
         # Prepare 2D coordinates
         coords = np.array([[a["lat"], a["lng"]] for a in attractions])
@@ -87,4 +87,95 @@ class GeoClusterer:
                 "lng": round(float(cluster_centers[old_idx][1]), 5)
             })
 
+        # ---- Balance pass -------------------------------------------------
+        # Raw K-Means can produce badly skewed groups (e.g. [5, 3, 1]), which
+        # yields near-empty days. Redistribute points from oversized clusters to
+        # the nearest undersized cluster until sizes differ by at most 1.
+        reordered_grouped, reordered_centroids = self._balance_clusters(
+            reordered_grouped, reordered_centroids
+        )
+
+        # Re-tag cluster bookkeeping after redistribution
+        for new_idx in range(k):
+            for it in reordered_grouped.get(new_idx, []):
+                it["cluster_id"] = new_idx
+                it["cluster_day"] = new_idx + 1
+
         return reordered_grouped, reordered_centroids
+
+    def _balance_clusters(
+        self,
+        grouped: Dict[int, List[Dict[str, Any]]],
+        centroids: List[Dict[str, float]]
+    ) -> Tuple[Dict[int, List[Dict[str, Any]]], List[Dict[str, float]]]:
+        """
+        Redistributes attractions so cluster sizes differ by at most 1
+        (no more 1-stop days when the data allows it).
+
+        Strategy: always enforce the size constraint, but pick the move that is
+        geographically least painful — among all (point, target-cluster) pairs,
+        choose the point whose distance penalty (distance to the receiving
+        centroid minus distance to its current centroid) is smallest.
+        """
+
+        def dist_to(point, center) -> float:
+            return haversine_distance_km(point["lat"], point["lng"], center["lat"], center["lng"])
+
+        guard = 0
+        max_moves = sum(len(v) for v in grouped.values()) * max(len(grouped), 1) + 10
+        while guard < max_moves:
+            guard += 1
+            sizes = {i: len(grouped[i]) for i in grouped if grouped[i]}
+            if len(sizes) < 2:
+                break
+            big = max(sizes, key=lambda i: sizes[i])
+            min_size = min(sizes.values())
+            if sizes[big] - min_size <= 1:
+                break
+
+            # Only the currently SMALLEST clusters may receive a point. Restricting
+            # receivers this way guarantees each move strictly reduces the
+            # size spread, so the loop always converges (a receiver that is
+            # nearly as big as the donor would let points ping-pong forever).
+            receivers = [i for i in sizes if sizes[i] == min_size]
+            if not receivers:
+                break
+
+            # Find the least-painful move: point from the big cluster whose
+            # "regret" (new dist - old dist) to its nearest small cluster is
+            # smallest, keeping days geographically coherent.
+            best = None  # (regret, point, target)
+            for point in grouped[big]:
+                old_d = dist_to(point, centroids[big])
+                target = min(receivers, key=lambda i: dist_to(point, centroids[i]))
+                new_d = dist_to(point, centroids[target])
+                regret = new_d - old_d
+                if best is None or regret < best[0]:
+                    best = (regret, point, target)
+
+            if best is None:
+                break
+
+            _, point, target = best
+            grouped[big].remove(point)
+            grouped[target].append(point)
+            # Recompute the receiving centroid so subsequent moves see reality
+            centroids[target] = {
+                "day": centroids[target]["day"],
+                "lat": round(sum(p["lat"] for p in grouped[target]) / len(grouped[target]), 5),
+                "lng": round(sum(p["lng"] for p in grouped[target]) / len(grouped[target]), 5),
+            }
+
+        # Drop clusters that ended up empty and reindex densely so day numbers
+        # (keys) always align with the centroids list positions.
+        dense_grouped: Dict[int, List[Dict[str, Any]]] = {}
+        dense_centroids: List[Dict[str, float]] = []
+        for i in sorted(grouped):
+            if not grouped[i]:
+                continue
+            new_i = len(dense_grouped)
+            dense_grouped[new_i] = grouped[i]
+            c = dict(centroids[i])
+            c["day"] = new_i + 1
+            dense_centroids.append(c)
+        return dense_grouped, dense_centroids

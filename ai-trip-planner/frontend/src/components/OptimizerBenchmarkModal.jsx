@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { X, Sparkles, Zap, Award, CheckCircle2, Clock, MapPin, Compass } from 'lucide-react';
+import { X, Sparkles, Zap, Award, Compass } from 'lucide-react';
+import { api } from '../api';
 
 export default function OptimizerBenchmarkModal({
   isOpen,
@@ -8,35 +9,32 @@ export default function OptimizerBenchmarkModal({
 }) {
   const [benchmarkData, setBenchmarkData] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
-
-  useEffect(() => {
-    if (isOpen) {
-      runBenchmark();
-    }
-  }, [isOpen, destination]);
+  const [error, setError] = useState(null);
 
   const runBenchmark = async () => {
     setIsLoading(true);
+    setError(null);
     try {
-      const res = await fetch('/api/compare-optimizers', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          destination,
-          day: 1,
-          max_time_budget_hours: 7.5
-        })
+      const data = await api.compareOptimizers({
+        destination,
+        day: 1,
+        max_time_budget_hours: 7.5
       });
-      if (res.ok) {
-        const data = await res.json();
-        setBenchmarkData(data);
-      }
+      setBenchmarkData(data);
     } catch (err) {
+      if (err.status !== 401) setError(err.message || 'Benchmark failed. Please try again.');
       console.error('Benchmark fetch failed:', err);
     } finally {
       setIsLoading(false);
     }
   };
+
+  useEffect(() => {
+    if (isOpen) {
+      runBenchmark();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, destination]);
 
   if (!isOpen) return null;
 
@@ -176,6 +174,10 @@ export default function OptimizerBenchmarkModal({
                 <strong>Why this matters for your trip:</strong> Visiting sights in the right sequence prevents unnecessary travel back and forth across town, letting you spend more time enjoying places and less time in transit.
               </div>
             </>
+          ) : error ? (
+            <div className="p-4 rounded-xl bg-rose-50 border border-rose-200 text-xs text-rose-700 text-center">
+              {error}
+            </div>
           ) : (
             <p className="text-xs text-slate-500 text-center">No comparison data available.</p>
           )}
