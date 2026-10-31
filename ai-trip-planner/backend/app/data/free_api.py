@@ -1,8 +1,17 @@
+import hashlib
 import requests
 import random
+import time
 from typing import List, Dict, Any, Optional
 
 USER_AGENT = "TripBuddyAIPlanner/1.0 (academic.planner.app@gmail.com)"
+
+# In-memory geocode caches (also rate-limits Nominatim to <= 1 req/sec per key
+# by reusing results instead of re-hitting the API).
+_GEOCODE_CACHE: Dict[str, Optional[Dict[str, Any]]] = {}
+_HOTEL_CACHE: Dict[str, Optional[Dict[str, Any]]] = {}
+_LAST_NOMINATIM_CALL = 0.0
+
 
 class FreeAPIClient:
     """
@@ -12,38 +21,77 @@ class FreeAPIClient:
     """
 
     @staticmethod
-    def geocode_city(city_name: str) -> Optional[Dict[str, Any]]:
-        """Geocodes any global city using OpenStreetMap Nominatim."""
-        if not city_name or not city_name.strip():
-            return None
+    def _nominatim_search(query: str, limit: int = 1) -> List[Dict[str, Any]]:
+        """Thin cached/rate-limited wrapper over the Nominatim search API."""
+        global _LAST_NOMINATIM_CALL
+        if not query or not query.strip():
+            return []
+        cache_key = f"{query.strip().lower()}|{limit}"
+        if cache_key in _GEOCODE_CACHE:
+            cached = _GEOCODE_CACHE[cache_key]
+            return [cached] if cached else []
+        # Nominatim fair-use policy: max 1 request/second
+        elapsed = time.time() - _LAST_NOMINATIM_CALL
+        if elapsed < 1.0:
+            time.sleep(1.0 - elapsed)
         try:
             url = "https://nominatim.openstreetmap.org/search"
             headers = {"User-Agent": USER_AGENT, "Accept-Language": "en"}
             params = {
-                "q": city_name.strip(),
+                "q": query.strip(),
                 "format": "json",
-                "limit": 1,
+                "limit": limit,
                 "addressdetails": 1,
                 "accept-language": "en"
             }
+            _LAST_NOMINATIM_CALL = time.time()
             resp = requests.get(url, params=params, headers=headers, timeout=6)
             if resp.status_code == 200 and resp.json():
                 res = resp.json()[0]
-                display_name = res.get("display_name", city_name)
+                display_name = res.get("display_name", query)
                 parts = display_name.split(",")
-                clean_name = parts[0].strip()
-                country = parts[-1].strip() if len(parts) > 1 else "International"
-                
-                return {
-                    "name": clean_name,
-                    "country": country,
+                result = {
+                    "name": parts[0].strip(),
+                    "country": parts[-1].strip() if len(parts) > 1 else "International",
                     "display_name": display_name,
                     "lat": float(res.get("lat")),
                     "lng": float(res.get("lon"))
                 }
+                _GEOCODE_CACHE[cache_key] = result
+                return [result]
         except Exception as e:
-            print(f"Geocode error for {city_name}: {e}")
-        return None
+            print(f"Nominatim search error for '{query}': {e}")
+        _GEOCODE_CACHE[cache_key] = None
+        return []
+
+    @staticmethod
+    def geocode_city(city_name: str) -> Optional[Dict[str, Any]]:
+        """Geocodes any global city using OpenStreetMap Nominatim."""
+        results = FreeAPIClient._nominatim_search(city_name)
+        return results[0] if results else None
+
+    @staticmethod
+    def geocode_hotel(hotel_query: str, city: str = "") -> Optional[Dict[str, Any]]:
+        """
+        Geocodes a hotel/accommodation name via Nominatim (free, keyless).
+        Appends the city when provided so 'Taj Palace' resolves inside the
+        destination rather than somewhere random in the world.
+        """
+        if not hotel_query or not hotel_query.strip():
+            return None
+        q = hotel_query.strip()
+        full_q = f"{q}, {city.strip()}" if city and city.strip().lower() not in q.lower() else q
+        cache_key = "hotel:" + full_q.lower()
+        if cache_key in _HOTEL_CACHE:
+            return _HOTEL_CACHE[cache_key]
+        # Try the city-qualified query first, then the bare hotel name
+        results = FreeAPIClient._nominatim_search(full_q)
+        if not results and full_q != q:
+            time.sleep(1.0)
+            results = FreeAPIClient._nominatim_search(q)
+        found = results[0] if results else None
+        _HOTEL_CACHE[cache_key] = found
+        return found
 
     @staticmethod
     def fetch_wikipedia_attractions(lat: float, lng: float, city_name: str = "", radius_m: int = 10000, limit: int = 35) -> List[Dict[str, Any]]:
@@ -73,7 +121,7 @@ class FreeAPIClient:
             "bank", "depository", "securities"
         ]
 
-        def parse_category(extract_text: str) -> str:
+        def parse_category(extract_text: str, title: str = "") -> str:
             ext_lower = extract_text.lower()
             if any(w in ext_lower for w in ["fine art", "art gallery", "art museum", "paintings", "sculpture", "exhibition of art"]):
                 return "Art"
@@ -89,7 +137,12 @@ class FreeAPIClient:
                 return "Food"
             elif any(w in ext_lower for w in ["architecture", "facade", "building", "hall"]):
                 return "Architecture"
-            return "History"
+            # No clear signal: distribute deterministically (by title hash) across
+            # plausible sightseeing categories so dynamically-fetched cities don't
+            # collapse into a single 'History' bucket.
+            fallback_cycle = ["History", "Architecture", "Viewpoint", "Nature"]
+            digest = int(hashlib.md5((title or extract_text[:60]).encode("utf-8")).hexdigest(), 16)
+            return fallback_cycle[digest % len(fallback_cycle)]
 
         headers = {"User-Agent": USER_AGENT}
         url = "https://en.wikipedia.org/w/api.php"
@@ -172,7 +225,7 @@ class FreeAPIClient:
                                 if dist_km > 60:
                                     continue
 
-                            cat = parse_category(extract)
+                            cat = parse_category(extract, title)
                             thumb = p.get("thumbnail", {}).get("source", "")
                             seen_titles.add(title.lower())
                             results.append({
@@ -226,7 +279,7 @@ class FreeAPIClient:
 
                         p_lat = coords[0].get("lat", lat) if coords else lat
                         p_lng = coords[0].get("lon", lng) if coords else lng
-                        cat = parse_category(extract)
+                        cat = parse_category(extract, title)
                         thumb = p.get("thumbnail", {}).get("source", "")
                         seen_titles.add(title.lower())
                         results.append({
