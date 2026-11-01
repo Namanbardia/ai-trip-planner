@@ -48,7 +48,7 @@ Single-admin JWT auth (default credentials **`admin` / `admin123`**):
 | `POST /api/auth/login` | Returns a JWT bearer token |
 | `GET /api/auth/me` | Validates the current token |
 
-- All planning endpoints (`plan-trip`, `feedback`, `save-trip`, `user-profile`, `compare-optimizers`, `destinations`) require `Authorization: Bearer <token>`; without it they return **401**.
+- All planning endpoints (`plan-trip`, `feedback`, `geocode-hotel`, `user-profile`, `compare-optimizers`, `destinations`) require `Authorization: Bearer <token>`; without it they return **401**.
 - Passwords are verified against a **PBKDF2-SHA256** hash (never plaintext).
 - Configure via `backend/.env` (copy from `backend/.env.example`): `ADMIN_USERNAME`, `ADMIN_PASSWORD_HASH`, `JWT_SECRET`, `JWT_EXPIRY_SECONDS`, `ALLOWED_ORIGINS`.
 
@@ -123,14 +123,14 @@ ai-trip-planner/
 │     ├─ models.py           # Pydantic request models
 │     ├─ data/               # seed destinations + free API client
 │     └─ ml/                 # semantic_matching, geo_clustering,
-│                             # optimizer, hotel_ranker, personalization,
+│                             # optimizer, personalization,
 │                             # transport_mode
 └─ frontend/
    └─ src/
       ├─ api.js              # fetch wrapper: JWT header + 401 handling
       ├─ App.jsx             # auth gate, hero, layout
       └─ components/         # LoginScreen, TripForm, MapContainer,
-                             # ItineraryView, HotelRecommendations,
+                             # ItineraryView,
                              # PersonalizationDrawer, OptimizerBenchmarkModal,
                              # PlanSkeleton, Navbar
 ```
